@@ -1,0 +1,21 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "hw1",
+            "type": "python",
+            "request": "launch",
+            "program": "/home/tkm36/homework_fall2019/hw1/cs285/scripts/run_hw1_behavior_cloning.py",
+            "console": "integratedTerminal",
+            "args": [
+                // "--expert_policy_file","cs285/policies/experts/Ant.pkl",
+                // "--env_name", "Ant-v2", "--exp_name test_dagger_ant --n_iter 10 --do_dagger --expert_data cs285/expert_data/expert_data_Ant-v2.pkl", "...",
+                "--expert_policy_file cs285/policies/experts/Ant.pkl --env_name Ant-v2 --exp_name test_dagger_ant --n_iter 10 --do_dagger --expert_data cs285/expert_data/expert_data_Ant-v2.pkl",
+            ]
+        }
+    ]
+}
