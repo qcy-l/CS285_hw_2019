@@ -4,7 +4,16 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
+        {
+            "name": "hw3",
+            "type": "python",
+            "request": "launch",
+            "program": "/home/tkm36/homework_fall2019/hw3/cs285/scripts/run_hw3_dqn.py",
+            "console": "integratedTerminal",
+            "args": ["--env_name","LunarLander-v2",
+            "--exp_name","q1"
+            ]
+        },
         {
             "name": "hw1",
             "type": "python",

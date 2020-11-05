@@ -54,44 +54,44 @@ class DQNCritic(BaseCritic):
             #currentReward + self.gamma * qValuesOfNextTimestep * (1 - self.done_mask_ph)
         # HINT2: see above, where q_tp1 is defined as the q values of the next timestep
         # HINT3: see the defined placeholders and look for the one that holds current rewards
-        target_q_t = TODO
-        target_q_t = tf.stop_gradient(target_q_t)
+        target_q_t = self.rew_t_ph + self.gamma * q_tp1 *(1-self.done_mask_ph)
+        target_q_t = tf.stop_gradient(target_q_t)#禁止对此的梯度传递
 
         #####################
 
         # TODO compute the Bellman error (i.e. TD error between q_t and target_q_t)
         # Note that this scalar-valued tensor later gets passed into the optimizer, to be minimized
         # HINT: use reduce mean of huber_loss (from infrastructure/dqn_utils.py) instead of squared error
-        self.total_error= TODO
+        self.total_error= tf.reduce_mean(huber_loss(target_q_t-self.q_t))
 
         #####################
 
-        # TODO these variables should all of the 
+        # TODO these variables all of the 
         # variables of the Q-function network and target network, respectively
         # HINT1: see the "scope" under which the variables were constructed in the lines at the top of this function
         # HINT2: use tf.get_collection to look for all variables under a certain scope
-        q_func_vars = TODO
-        target_q_func_vars = TODO
+        q_func_vars = tf.get_collection(tf.GraphKeys.VARIABLES,scope = 'q_func')
+        target_q_func_vars = tf.get_collection(tf.GraphKeys.VARIABLES,scope = 'target_q_func')
 
         #####################
 
         # train_fn will be called in order to train the critic (by minimizing the TD error)
         self.learning_rate = tf.placeholder(tf.float32, (), name="learning_rate")
-        optimizer = self.optimizer_spec.constructor(learning_rate=self.learning_rate, **self.optimizer_spec.kwargs)
+        optimizer = self.optimizer_spec.constructor(learning_rate=self.learning_rate, **self.optimizer_spec.kwargs)#call optimizer construct function
         self.train_fn = minimize_and_clip(optimizer, self.total_error,
                                           var_list=q_func_vars, clip_val=self.grad_norm_clipping)
-
+        
         # update_target_fn will be called periodically to copy Q network to target Q network
         update_target_fn = []
         for var, var_target in zip(sorted(q_func_vars,        key=lambda v: v.name),
                                    sorted(target_q_func_vars, key=lambda v: v.name)):
-            update_target_fn.append(var_target.assign(var))
-        self.update_target_fn = tf.group(*update_target_fn)
+            update_target_fn.append(var_target.assign(var))#put var variables into var_target
+        self.update_target_fn = tf.group(*update_target_fn)#call for update target network
 
     def define_placeholders(self):
         # set up placeholders
         # placeholder for current observation (or state)
-        lander = self.env_name == 'LunarLander-v2'
+        lander = self.env_name == 'LunarLander-v2'#will affect data type
 
         self.obs_t_ph = tf.placeholder(
             tf.float32 if lander else tf.uint8, [None] + list(self.input_shape))

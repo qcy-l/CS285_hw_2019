@@ -108,7 +108,17 @@ class MLPPolicy(BasePolicy):
     # query the policy with observation(s) to get selected action(s)
     def get_action(self, obs):
 
-        # TODO: GETTHIS from HW1
+
+        if len(obs.shape)>1:
+            observation = obs
+        else:
+            observation = obs[None]
+
+        # TODO return the action that the policy prescribes
+        # HINT1: you will need to call self.sess.run
+        # HINT2: the tensor we're interested in evaluating is self.sample_ac
+        # HINT3: in order to run self.sample_ac, it will need observation fed into the feed_dict
+        return self.sess.run(self.sample_ac,feed_dict={self.observations_pl:observation})
 
 #####################################################
 #####################################################
@@ -157,20 +167,20 @@ class MLPPolicyPG(MLPPolicy):
             # to get [Q_t - b_t]
         # HINT4: don't forget that we need to MINIMIZE this self.loss
             # but the equation above is something that should be maximized
-        self.loss = tf.reduce_sum(TODO)
+        self.loss = tf.reduce_sum(-self.logprob_n * self.adv_n)
 
         # TODO: define what exactly the optimizer should minimize when updating the policy
-        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(TODO)
+        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
         if self.nn_baseline:
             # TODO: define the loss that should be optimized for training the baseline
             # HINT1: use tf.losses.mean_squared_error, similar to SL loss from hw1
             # HINT2: we want predictions (self.baseline_prediction) to be as close as possible to the labels (self.targets_n)
                 # see 'update' function below if you don't understand what's inside self.targets_n
-            self.baseline_loss = TODO
+            self.baseline_loss = tf.losses.mean_squared_error(self.targets_n, self.baseline_prediction)
 
             # TODO: define what exactly the optimizer should minimize when updating the baseline
-            self.baseline_update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(TODO)
+            self.baseline_update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.baseline_loss)
 
     #########################
 
@@ -180,7 +190,8 @@ class MLPPolicyPG(MLPPolicy):
         # HINT1: query it with observation(s) to get the baseline value(s)
         # HINT2: see build_baseline_forward_pass (above) to see the tensor that we're interested in
         # HINT3: this will be very similar to how you implemented get_action (above)
-        return TODO
+        # import ipdb; ipdb.set_trace()
+        return self.sess.run(self.baseline_prediction,feed_dict={self.observations_pl:obs})
 
     def update(self, observations, acs_na, adv_n=None, acs_labels_na=None, qvals=None):
         assert(self.training, 'Policy must be created with training=True in order to perform training updates...')
@@ -191,8 +202,50 @@ class MLPPolicyPG(MLPPolicy):
             targets_n = (qvals - np.mean(qvals))/(np.std(qvals)+1e-8)
             # TODO: update the nn baseline with the targets_n
             # HINT1: run an op that you built in define_train_op
-            TODO
+            _, bl_loss = self.sess.run([self.baseline_update_op,self.baseline_loss],feed_dict={self.observations_pl: observations, self.targets_n: targets_n})
         return loss
 
 #####################################################
 #####################################################
+
+class MLPValue(BasePolicy):
+    def __init__(self,
+        sess,
+        ob_dim,
+        n_layers,
+        size,
+        learning_rate,
+        value_scope,
+        **kwards):
+        super().__init__(**kwargs)
+
+        self.sess = sess
+        self.ob_dim = ob_dim
+        self.n_layers = n_layers
+        self.size = size
+        self.learning_rate = learning_rate
+
+        with tf.variable_scope(value_scope):
+            self.define_placeholders()
+            self.define_forward_pass()
+            
+        
+    def define_placeholders(self):
+        self.observations_pl = tf.placeholder(shape=[None,self.ob_dim],name = "observation",dtype = tf.float32)
+        self.real_values = tf.placeholder(shape=[None],name = "real_value")
+        self.values = tf.placeholder(shape=[None],name = "values")
+        
+    def define_forward_pass(self):
+        self.values = build_mlp(self.observations_pl, output_size=1, scope='value', n_layers=self.n_layers, size=self.size)
+        
+        
+    def define_train_op(self):
+        self.loss=tf.losses.mean_squared_error(self.real_values,self.values)
+        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+
+    def update(self,observations,lables):
+        _,loss = self.sess.run([self.train_op,self.loss],feed_dict={self.observations_pl:observations,self.real_values:lables})
+        return loss
+
+    def get_value(self,observations):
+        return self.sess.run(self.values,feed_dict={self.observations_pl:observations})

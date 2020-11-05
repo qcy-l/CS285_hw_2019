@@ -55,7 +55,7 @@ def get_env_kwargs(env_name):
 
     return kwargs
 
-
+#these two are our baby networks
 def lander_model(obs, num_actions, scope, reuse=False):
     with tf.variable_scope(scope, reuse=reuse):
         out = obs
@@ -179,7 +179,7 @@ class ConstantSchedule(object):
 
 
 def linear_interpolation(l, r, alpha):
-    return l + alpha * (r - l)
+    return l + alpha * (r - l)#线性插值
 
 
 class PiecewiseSchedule(object):
@@ -202,7 +202,7 @@ class PiecewiseSchedule(object):
             raised when outside value is requested.
         """
         idxes = [e[0] for e in endpoints]
-        assert idxes == sorted(idxes)
+        assert idxes == sorted(idxes)#make sure the indes are good and store them into class
         self._interpolation = interpolation
         self._outside_value = outside_value
         self._endpoints      = endpoints
@@ -242,7 +242,7 @@ class LinearSchedule(object):
         fraction  = min(float(t) / self.schedule_timesteps, 1.0)
         return self.initial_p + fraction * (self.final_p - self.initial_p)
 
-def compute_exponential_averages(variables, decay):
+def compute_exponential_averages(variables, decay):#滑动均值 [](https://www.cnblogs.com/wuliytTaotao/p/9479958.html)
     """Given a list of tensorflow scalar variables
     create ops corresponding to their exponential
     averages
@@ -260,8 +260,8 @@ def compute_exponential_averages(variables, decay):
         of variables.
     """
     averager = tf.train.ExponentialMovingAverage(decay=decay)
-    apply_op = averager.apply(variables)
-    return [averager.average(v) for v in variables], apply_op
+    apply_op = averager.apply(variables)#添加variables 到跟踪对象列表，从此apply op中就有一个代表他过去平均的shalow copy
+    return [averager.average(v) for v in variables], apply_op#更新 v的shalow copies 并返回当前估计
 
 def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
     """Minimized `objective` using `optimizer` w.r.t. variables in
@@ -271,8 +271,8 @@ def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
     gradients = optimizer.compute_gradients(objective, var_list=var_list)
     for i, (grad, var) in enumerate(gradients):
         if grad is not None:
-            gradients[i] = (tf.clip_by_norm(grad, clip_val), var)
-    return optimizer.apply_gradients(gradients)
+            gradients[i] = (tf.clip_by_norm(grad, clip_val), var)#Clip
+    return optimizer.apply_gradients(gradients)#apply
 
 def initialize_interdependent_variables(session, vars_list, feed_dict):
     """Initialize a list of variables one at a time, which is useful if
