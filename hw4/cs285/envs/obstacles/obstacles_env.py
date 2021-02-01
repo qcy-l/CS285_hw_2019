@@ -113,7 +113,6 @@ class Obstacles(gym.Env):
         #get vars
         curr_pos = observations[:, :2]
         end_pos = observations[:, -2:]
-
         #calc rew
         dist = np.linalg.norm(curr_pos - end_pos, axis=1)
         self.reward_dict['dist'] = -dist

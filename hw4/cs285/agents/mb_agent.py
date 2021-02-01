@@ -9,7 +9,7 @@ class MBAgent(BaseAgent):
     def __init__(self, sess, env, agent_params):
         super(MBAgent, self).__init__()
 
-        self.env = env.unwrapped 
+        self.env = env.unwrapped #TODOJ
         self.sess = sess
         self.agent_params = agent_params
         self.ensemble_size = self.agent_params['ensemble_size']
@@ -48,12 +48,12 @@ class MBAgent(BaseAgent):
             # select which datapoints to use for this model of the ensemble
             # you might find the num_data_per_env variable defined above useful
 
-            observations = # TODO(Q1)
-            actions = # TODO(Q1)
-            next_observations = # TODO(Q1)
+            observations = ob_no[num_data_per_ens*i:num_data_per_ens*(i+1)-1]# TODO(Q1)
+            actions = ac_na[num_data_per_ens*i:num_data_per_ens*(i+1)-1]# TODO(Q1)
+            next_observations = next_ob_no[num_data_per_ens*i:num_data_per_ens*(i+1)-1]# TODO(Q1)
 
             # use datapoints to update one of the dyn_models
-            model =  # TODO(Q1)
+            model =  self.dyn_models[i]# TODO(Q1)
             loss = model.update(observations, actions, next_observations, self.data_statistics)
             losses.append(loss)
 

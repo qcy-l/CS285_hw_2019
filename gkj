@@ -1,0 +1,351 @@
+
+# ROS
+import roslib
+import roslib.message
+import roslib.names
+import rospkg
+import rospy
+import rostopic
+import tf
+
+# status
+from internal_command import status
+
+
+# msgs
+from nav_msgs.msg import Odometry
+from xdrone_msgs.msg import odo_sequence
+from sensor_msgs.msg import Joy
+from geometry_msgs.msg import Point
+from xdrone_msgs.srv import TakeOff, TakeOffRequest
+from xdrone_msgs.srv import ArmDrone
+from xdrone_msgs.srv import PlanSequence
+from xdrone_msgs.msg import bias_info
+from xdrone_msgs.msg import trigger_grasp
+from xdrone_msgs.msg import velocity_controlAction
+
+# state machine
+import smach
+from smach import StateMachine
+import smach_ros
+
+# math
+from math import pi
+from math import acos
+import numpy as np
+
+# utility
+import copy
+
+
+class Onland(smach.State):
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['to_takeoff'])
+
+    def execute(self, ud):
+        while True:
+            if status.boot_drone == True:
+                status.boot_drone = False
+                return 'to_takeoff'
+            rospy.loginfo_throttle(5, "drone on land, not taking off")
+            rospy.sleep(0.5)
+
+
+class TakeOfffff(smach.State):
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['to_idle', 'to_onland'])
+        self.takeoff_client = rospy.ServiceProxy(
+            '/xdrone/take_off_service', TakeOff)
+
+    def execute(self, ud):
+        status.arm_state = 'HOME'
+
+        result = self.takeoff_client(TakeOffRequest())
+        if result.success:
+            return 'to_idle'
+        else:
+            rospy.logerr("Take Off Failed, return to OnLand State")
+            return 'to_onland'
+
+
+class Idle(smach.State):
+    def __init__(self):
+        smach.State.__init__(
+            self, outcomes=['start_gopoints', 'start_grasp_target'])
+        self.armdrone_client = rospy.ServiceProxy(
+            '/xdrone/arm_drone_service', ArmDrone)
+
+    def execute(self, ud):
+        rospy.set_param('/on_mission', 0)
+        status.arm_state = 'HOME'
+        status.abort_mission = False
+        self.armdrone_client(False)
+
+        while True:
+            if status.set_go_points:
+                self.armdrone_client(True)
+                return 'start_gopoints'
+            elif status.set_target_point:
+                self.armdrone_client(True)
+                return 'start_grasp_target'
+            rospy.loginfo_throttle(5, 'staying Idle')
+            rospy.sleep(0.1)
+
+
+class Plan(smach.State):
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['to_execute', 'to_idle'])
+        self.plan_client = rospy.ServiceProxy('/xdrone/plan_seq', PlanSequence)
+
+    def execute(self, ud):
+        status.set_go_points = False
+        if status.seq_len > 0:
+            status.plan_time = status.plan_time+1
+            rospy.loginfo(
+                "Plan for the"+str(status.plan_time)+"th time")
+            # self.odo_pub.publish(status.odoseq)
+            status.last_plan_success = self.plan_client(status.odoseq)  # sth)
+
+            while status.seq_len > 0:
+                status.odoseq.odos.pop()
+                status.seq_len = status.seq_len-1
+        else:
+            status.last_plan_success = False
+            rospy.logerr("Empty sequence, not planning")
+
+        if not status.last_plan_success:
+            status.abort_mission = True
+            return 'to_idle'
+
+        return 'to_execute'
+
+
+class Execute(smach.State):
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['to_idle'])
+
+    def execute(self, ud):
+        rospy.set_param('/on_mission', 1)
+        while True:
+            if status.abort_mission:
+                return 'to_idle'
+            rospy.sleep(0.1)
+
+
+'''
+    set trajectory plans for approaching the target
+'''
+
+
+def plan_for_target(odo_seq):
+    seq_len = len(odo_seq.odos)
+    if seq_len == 1:
+        target = odo_seq.odos[0]
+        now = Odometry()
+        temp = Odometry()
+        target_odo_seq = odo_sequence()
+
+        listener = tf.TransformListener()
+        listener.waitForTransform(
+            "/world", "/state", rospy.Time(), rospy.Duration(4.0))
+        (trans, rot) = listener.lookupTransform(
+            "/world", "/state", rospy.Time(0))
+        now.pose.pose.position.x = trans[0]
+        now.pose.pose.position.y = trans[1]
+        now.pose.pose.position.z = trans[2]
+        now.pose.pose.orientation.x = rot[0]
+        now.pose.pose.orientation.y = rot[1]
+        now.pose.pose.orientation.z = rot[2]
+        now.pose.pose.orientation.w = rot[3]
+
+        deltaX = target.pose.pose.position.x-now.pose.pose.position.x
+        deltaY = target.pose.pose.position.y - now.pose.pose.position.y
+        Dis = ((deltaX-deltaY)**2)**0.5
+        dx = deltaX/Dis
+        dy = deltaY/Dis
+
+        # calculate the angle
+        if dy >= 0:
+            yaw = acos(dx)
+        else:
+            yaw = 2*pi-acos(dx)
+
+        # FIRST POINT
+        temp.pose.pose.position.x = target.pose.pose.position.x-2*dx
+        temp.pose.pose.position.y = target.pose.pose.position.y-2*dy
+        temp.pose.pose.position.z = target.pose.pose.position.z
+        tf_array = tf.transformations.quaternion_from_euler(
+            0, 0, yaw+0.01*np.random.rand())
+        temp.pose.pose.orientation.x = tf_array[0]
+        temp.pose.pose.orientation.y = tf_array[1]
+        temp.pose.pose.orientation.z = tf_array[2]
+        temp.pose.pose.orientation.w = tf_array[3]
+        target_odo_seq.odos.append(copy.deepcopy(temp))
+
+        # SECOND POINT
+        temp.pose.pose.position.x = target.pose.pose.position.x+2*dx
+        temp.pose.pose.position.y = target.pose.pose.position.y+2*dy
+        temp.pose.pose.position.z = target.pose.pose.position.z
+        tf_array = tf.transformations.quaternion_from_euler(
+            0, 0, yaw+0.01*np.random.rand())
+        temp.pose.pose.orientation.x = tf_array[0]
+        temp.pose.pose.orientation.y = tf_array[1]
+        temp.pose.pose.orientation.z = tf_array[2]
+        temp.pose.pose.orientation.w = tf_array[3]
+        target_odo_seq.odos.append(copy.deepcopy(temp))
+
+        # call for plan
+
+        return target_odo_seq
+    elif seq_len > 1:
+        rospy.logerr("too much targets, Comfused!")
+        return false
+    else:
+        rospy.logerr("Empty sequence, not planning")
+        return false
+
+
+class ApproachWithoutTarget(smach.State):#When Vision detection has not been used
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['to_idle', 'to_with_target'])
+        self.plan_client = rospy.ServiceProxy('/xdrone/plan_seq', PlanSequence)
+
+    def execute(self, ud):
+
+        #plan for current target
+        status.set_target_point = False#TODOJ
+        status.arm_state = 'READY'
+        target_odo = plan_for_target(status.odoseq)
+
+        status.last_plan_success = self.plan_client(target_odo)  # sth)
+        if not status.last_plan_success:
+            rosp.logerror("Plan for target failed!!")
+            return 'to_idle'
+
+        #param set when successfully planned
+        rospy.set_param('/xdrone_vision/start_detection',1)
+        rospy.set_param('/on_mission', 1)
+
+        while True:
+            if rospy.get_param('/xdrone_vision/target_detected'):
+                #trigger dynamic control after vision detected
+                rospy.set_param('/xdrone_control/dynamic_rectifying',1)
+                return 'to_with_target'
+            elif status.abort_mission:
+                return 'to_idle'
+
+
+    # class PlanWithSeen(smach.State):
+    #     def __init__(self):
+    #         smach.State.__init__(self, outcomes=['to_with_target', 'to_idle'])
+    #         self.plan_client = rospy.ServiceProxy('/xdrone/plan_seq', PlanSequence)
+
+    #     def execute(self, ud):
+    #         # you can also specity params
+    #         status.last_plan_success = plan_for_target(
+    #             status.odoseq, self.plan_client)
+
+    #         if not status.last_plan_success:
+    #             rosp.logerror("Plan for target failed!!")
+    #             return 'to_idle'
+    #         else:
+    #             return 'to_with_target'
+
+
+class ApproachWithTarget(smach.State):
+    def __init__(self):
+        smach.State.__init__(
+            self, outcomes=['to_no_target', 'to_idle', 'grasp_done'])
+
+    def execute(self, ud):
+        while True:
+            if status.arm_state == 'GRASP' and status.grasp_succeed:
+                rospy.set_param('/xdrone_control/dynamic_rectifying',0)
+                rospy.set_param('/xdrone_vision/start_detection',0)
+                return 'grasp_done'
+
+            if status.abort_mission:
+                rospy.set_param('/xdrone_control/dynamic_rectifying',0)
+                rospy.set_param('/xdrone_vision/start_detection',0)
+                return 'to_idle'
+
+            elif status.arm_state == 'GRASP':
+                rospy.logwarn_once('TRIGGER GRASP')
+                continue
+            rospy.sleep(0.1)
+
+
+
+class GraspDone(smach.State):
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['to_idle'])
+
+    def execute(self, ud):
+        status.arm_state = 'HOME'
+        if status.abort_mission:
+            return 'to_idle'
+
+
+def construct_drone_sm():
+    sm = StateMachine(outcomes=[])
+
+    with sm:
+        StateMachine.add(
+            'Onland',
+            Onland(),
+            transitions={'to_takeoff': 'TakeOff'}
+        )
+
+        StateMachine.add(
+            'TakeOff',
+            TakeOfffff(),
+            transitions={'to_idle': 'Idle',
+                         'to_onland': 'Onland'}
+        )
+
+        StateMachine.add(
+            'Idle',
+            Idle(),
+            transitions={'start_gopoints': 'Plan',
+                         'start_grasp_target': 'ApproachWithoutTarget'}
+        )
+
+        StateMachine.add(
+            'Plan',
+            Plan(),
+            transitions={'to_execute': 'Execute',
+                         'to_idle': 'Idle'}
+        )
+
+        StateMachine.add(
+            'Execute',
+            Execute(),
+            transitions={'to_idle': 'Idle'}
+        )
+
+        StateMachine.add(
+            'ApproachWithoutTarget',
+            ApproachWithoutTarget(),
+            transitions={'to_idle': 'Idle',
+                         'to_plan_with_seen': 'PlanWithSeen'}
+        )
+
+        StateMachine.add(
+            'ApproachWithTarget',
+            ApproachWithTarget(),
+            transitions={'to_no_target': 'ApproachWithoutTarget',
+                         'to_idle': 'Idle',
+                         'grasp_done': 'GraspDone',
+                         'to_plan_with_seen': 'PlanWithSeen'
+                         }
+        )
+
+        StateMachine.add(
+            'GraspDone',
+            GraspDone(),
+            transitions={
+                'to_idle': 'Idle'
+            }
+        )
+
+    return sm
